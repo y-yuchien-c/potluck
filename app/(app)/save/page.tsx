@@ -210,40 +210,48 @@ export default function SavePage() {
       </div>
 
       {extractionLooksThin && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 space-y-1">
-          <p className="text-sm font-medium text-amber-800">⚠️ Couldn&apos;t extract much from this reel</p>
-          <p className="text-xs text-amber-600">
-            Instagram/TikTok block scraping, so some fields are empty. Fill them in manually — or paste the recipe caption below and tap &ldquo;Re-extract&rdquo;.
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 space-y-2">
+          <p className="text-sm font-medium text-amber-800">⚠️ Couldn&apos;t read this reel</p>
+          <p className="text-xs text-amber-600 leading-relaxed">
+            Instagram blocks scraping. Best fix: <strong>screenshot the reel caption</strong> while it&apos;s open, then upload it here — Claude will read the text from the image.
           </p>
-          <div className="flex gap-2 pt-1">
-            <textarea
-              className="input flex-1 text-xs min-h-[60px] resize-none"
-              placeholder="Paste the caption or recipe text here…"
-              id="manual-caption"
-            />
-            <button
-              className="btn-secondary text-xs px-3 shrink-0 self-end"
-              onClick={async () => {
-                const caption = (document.getElementById('manual-caption') as HTMLTextAreaElement)?.value
-                if (!caption) return
-                setStep('extracting')
-                setSlowHint(false)
-                try {
-                  const res = await fetch('/api/extract', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url, caption }),
-                  })
-                  if (!res.ok) throw new Error(await res.text())
-                  setRecipe(await res.json())
-                  setStep('review')
-                } catch {
-                  setStep('review') // stay on review even if re-extract fails
-                }
-              }}
-            >
-              Re-extract
-            </button>
+          <div className="pt-1">
+            <label className="btn-secondary text-xs cursor-pointer inline-flex items-center gap-1.5">
+              📷 Upload screenshot
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0]
+                  if (!file) return
+                  setStep('extracting')
+                  setSlowHint(false)
+                  try {
+                    const base64 = await new Promise<string>((resolve, reject) => {
+                      const reader = new FileReader()
+                      reader.onload = () => resolve((reader.result as string).split(',')[1])
+                      reader.onerror = reject
+                      reader.readAsDataURL(file)
+                    })
+                    const res = await fetch('/api/extract', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        url,
+                        imageBase64: base64,
+                        mediaType: file.type || 'image/jpeg',
+                      }),
+                    })
+                    if (!res.ok) throw new Error(await res.text())
+                    setRecipe(await res.json())
+                    setStep('review')
+                  } catch {
+                    setStep('review')
+                  }
+                }}
+              />
+            </label>
           </div>
         </div>
       )}

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { extractRecipeFromUrl } from '@/lib/claude'
+import { extractRecipeFromUrl, extractRecipeFromImage } from '@/lib/claude'
 import { createClient } from '@/lib/supabase/server'
 
 export async function POST(req: NextRequest) {
@@ -10,12 +10,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { url, caption } = await req.json()
+  const { url, caption, imageBase64, mediaType } = await req.json()
+
+  // ── Vision path: user uploaded a screenshot ────────────────────────────────
+  if (imageBase64) {
+    try {
+      const recipe = await extractRecipeFromImage(
+        imageBase64,
+        mediaType ?? 'image/jpeg',
+        url || undefined
+      )
+      return NextResponse.json(recipe)
+    } catch (err) {
+      console.error('Vision extraction failed:', err)
+      return NextResponse.json({ error: 'Failed to read screenshot' }, { status: 500 })
+    }
+  }
+
   if (!url) {
     return NextResponse.json({ error: 'URL is required' }, { status: 400 })
   }
 
-  // If user pasted the caption manually, use it directly and skip scraping
+  // ── Caption path: user pasted text manually ────────────────────────────────
   if (caption?.trim()) {
     try {
       const recipe = await extractRecipeFromUrl(url, caption.trim())
@@ -26,15 +42,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Try to scrape Open Graph metadata for better extraction
+  // ── URL path: try to scrape Open Graph metadata ────────────────────────────
   let pageContent: string | undefined
   let thumbnail: string | undefined
 
   try {
     const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; Potluck/1.0; +https://potluck.app)',
-      },
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Potluck/1.0; +https://potluck.app)' },
       signal: AbortSignal.timeout(6000),
     })
     const html = await res.text()
@@ -54,9 +68,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const recipe = await extractRecipeFromUrl(url, pageContent)
-    if (!recipe.thumbnail_url && thumbnail) {
-      recipe.thumbnail_url = thumbnail
-    }
+    if (!recipe.thumbnail_url && thumbnail) recipe.thumbnail_url = thumbnail
     return NextResponse.json(recipe)
   } catch (err) {
     console.error('Recipe extraction failed:', err)
