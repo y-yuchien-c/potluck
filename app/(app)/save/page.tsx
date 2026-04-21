@@ -15,11 +15,12 @@ export default function SavePage() {
 
   const url = params.get('url') ?? ''
 
-  const [step,      setStep]      = useState<Step>(url ? 'extracting' : 'review')
-  const [recipe,    setRecipe]    = useState<ExtractedRecipe | null>(null)
-  const [errorMsg,  setErrorMsg]  = useState('')
-  const [households, setHouseholds] = useState<{ id: string; name: string }[]>([])
+  const [step,           setStep]           = useState<Step>(url ? 'extracting' : 'review')
+  const [recipe,         setRecipe]         = useState<ExtractedRecipe | null>(null)
+  const [errorMsg,       setErrorMsg]       = useState('')
+  const [households,     setHouseholds]     = useState<{ id: string; name: string }[]>([])
   const [targetHousehold, setTargetHousehold] = useState<string>('personal')
+  const [slowHint,       setSlowHint]       = useState(false)
 
   // Fetch user's households for the save destination picker
   useEffect(() => {
@@ -39,17 +40,24 @@ export default function SavePage() {
   const extract = useCallback(async () => {
     if (!url) return
     setStep('extracting')
+    setSlowHint(false)
+
+    // Show a hint if it's taking more than 5 seconds
+    const slowTimer = setTimeout(() => setSlowHint(true), 5000)
+
     try {
       const res  = await fetch('/api/extract', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ url }),
       })
+      clearTimeout(slowTimer)
       if (!res.ok) throw new Error(await res.text())
       const data = await res.json()
       setRecipe(data)
       setStep('review')
     } catch (err) {
+      clearTimeout(slowTimer)
       setErrorMsg(err instanceof Error ? err.message : 'Extraction failed')
       setStep('error')
     }
@@ -124,10 +132,19 @@ export default function SavePage() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (step === 'extracting') return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-6">
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-6 text-center">
       <div className="text-5xl animate-bounce">🍳</div>
       <p className="font-semibold text-stone-700">Reading the reel…</p>
-      <p className="text-sm text-stone-400 text-center">Claude is extracting the recipe for you</p>
+      <p className="text-sm text-stone-400">Claude is extracting the recipe for you</p>
+
+      {slowHint && (
+        <div className="mt-4 max-w-xs bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 space-y-1">
+          <p className="text-sm font-medium text-amber-800">Taking a bit longer than usual</p>
+          <p className="text-xs text-amber-600">
+            Instagram and TikTok block direct scraping, so Claude is working from the URL alone. It usually still gets the recipe — hang tight!
+          </p>
+        </div>
+      )}
     </div>
   )
 
@@ -182,12 +199,54 @@ export default function SavePage() {
     )
   }
 
+  // Warn if extraction looks thin
+  const extractionLooksThin = !recipe.title || recipe.ingredients.length === 0
+
   return (
     <div className="p-4 space-y-5">
       <div className="flex items-center gap-3 mb-2">
         <button onClick={() => router.back()} className="text-stone-400 text-xl">←</button>
         <h1 className="text-xl font-bold">Review recipe</h1>
       </div>
+
+      {extractionLooksThin && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 space-y-1">
+          <p className="text-sm font-medium text-amber-800">⚠️ Couldn&apos;t extract much from this reel</p>
+          <p className="text-xs text-amber-600">
+            Instagram/TikTok block scraping, so some fields are empty. Fill them in manually — or paste the recipe caption below and tap &ldquo;Re-extract&rdquo;.
+          </p>
+          <div className="flex gap-2 pt-1">
+            <textarea
+              className="input flex-1 text-xs min-h-[60px] resize-none"
+              placeholder="Paste the caption or recipe text here…"
+              id="manual-caption"
+            />
+            <button
+              className="btn-secondary text-xs px-3 shrink-0 self-end"
+              onClick={async () => {
+                const caption = (document.getElementById('manual-caption') as HTMLTextAreaElement)?.value
+                if (!caption) return
+                setStep('extracting')
+                setSlowHint(false)
+                try {
+                  const res = await fetch('/api/extract', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, caption }),
+                  })
+                  if (!res.ok) throw new Error(await res.text())
+                  setRecipe(await res.json())
+                  setStep('review')
+                } catch {
+                  setStep('review') // stay on review even if re-extract fails
+                }
+              }}
+            >
+              Re-extract
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Title */}
       <div>

@@ -10,9 +10,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const { url } = await req.json()
+  const { url, caption } = await req.json()
   if (!url) {
     return NextResponse.json({ error: 'URL is required' }, { status: 400 })
+  }
+
+  // If user pasted the caption manually, use it directly and skip scraping
+  if (caption?.trim()) {
+    try {
+      const recipe = await extractRecipeFromUrl(url, caption.trim())
+      return NextResponse.json(recipe)
+    } catch (err) {
+      console.error('Recipe extraction failed:', err)
+      return NextResponse.json({ error: 'Failed to extract recipe' }, { status: 500 })
+    }
   }
 
   // Try to scrape Open Graph metadata for better extraction
